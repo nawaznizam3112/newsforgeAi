@@ -8,6 +8,7 @@ Secrets/env: GEMINI_API_KEY, ADMIN_PASSWORD
 import html, json, os, re, sqlite3, sys, time
 from contextlib import contextmanager
 from datetime import date
+from urllib.parse import quote
 
 import feedparser
 import pandas as pd
@@ -311,45 +312,144 @@ def subscribe(email, role):
             print("webhook failed:", e)
     return "ok"
 
-def signup_box(key):
-    with st.container(border=True):
-        st.markdown("**📬 Get the weekly regulatory digest**")
-        st.caption("Top FDA, EU MDR/IVDR, MHRA and CDSCO changes for device & dental professionals. Free.")
-        with st.form(f"signup_{key}", clear_on_submit=True):
-            email = st.text_input("Email", key=f"em_{key}", placeholder="you@company.com")
-            role = st.selectbox("I work in", ROLES, key=f"ro_{key}")
-            go = st.form_submit_button("Subscribe")
-        if go:
-            res = subscribe(email, role)
-            if res == "ok":
-                st.success("You're subscribed. Thank you!")
-            elif res == "exists":
-                st.info("This email is already subscribed.")
-            else:
-                st.error("Please enter a valid email address.")
-        if get_setting("signup_url"):
-            st.link_button("Or subscribe on our newsletter page ↗", get_setting("signup_url"))
+def signup_form(key):
+    with st.form(f"signup_{key}", clear_on_submit=True):
+        email = st.text_input("Email", key=f"em_{key}", placeholder="you@company.com")
+        role = st.selectbox("I work in", ROLES, key=f"ro_{key}")
+        go = st.form_submit_button("Subscribe to the digest")
+    if go:
+        res = subscribe(email, role)
+        if res == "ok":
+            st.success("You're subscribed. Thank you!")
+        elif res == "exists":
+            st.info("This email is already subscribed.")
+        else:
+            st.error("Please enter a valid email address.")
+    if get_setting("signup_url"):
+        st.link_button("Or join on our newsletter page ↗", get_setting("signup_url"))
 
-# ============================== PUBLIC PAGE ==============================
-CSS = """
+# ============================== PUBLIC PAGE (luxury theme) ==============================
+LUX_CSS = """
 <style>
-.block-container{padding-top:2rem;max-width:1200px}
-h1.brand{font-family:Georgia,serif;font-size:2.4rem;margin:0}
-.badge{display:inline-block;color:#fff;border-radius:4px;padding:1px 8px;font-size:.72rem;font-weight:600;letter-spacing:.04em}
-.chip{display:inline-block;background:#e5e7eb;color:#111827;border-radius:4px;padding:1px 8px;font-size:.72rem;margin-left:4px}
-.meta{color:#6b7280;font-size:.8rem}
-.card-title{font-family:Georgia,serif;font-weight:700;font-size:1.08rem;line-height:1.3;margin:.35rem 0}
-[data-testid="stImage"] img{border-radius:8px;object-fit:cover}
-.disclaimer{color:#6b7280;font-size:.78rem;margin-top:2rem}
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
+:root{--bg:#0a0f1c;--panel:#111a2e;--panel2:#16213a;--gold:#c9a24b;--gold2:#e8d08a;--ivory:#f3ede0;--muted:#9aa4b8;--line:rgba(201,162,75,.28)}
+.stApp{background:radial-gradient(1100px 520px at 85% -8%,#1c2c4d 0%,transparent 62%),radial-gradient(900px 480px at -10% 30%,#14203a 0%,transparent 60%),var(--bg);font-family:'Inter',sans-serif}
+[data-testid="stHeader"]{background:transparent}
+.block-container{padding-top:1.2rem;max-width:1240px}
+.stApp p,.stApp li,.stApp label,.stApp h1,.stApp h2,.stApp h3,.stApp h4,[data-testid="stMarkdownContainer"] p{color:var(--ivory)!important}
+[data-testid="stCaptionContainer"],[data-testid="stCaptionContainer"] p{color:var(--muted)!important}
+[data-testid="stSidebar"]{background:#0c1322;border-right:1px solid var(--line)}
+[data-testid="stSidebar"] h2{font-family:'Playfair Display',serif;color:var(--gold2)!important}
+/* inputs */
+.stApp input,.stApp textarea,.stApp [data-baseweb="select"]>div,.stApp [data-baseweb="input"]{background:var(--panel2)!important;color:var(--ivory)!important;border-color:var(--line)!important}
+.stApp [data-baseweb="select"] *{color:var(--ivory)!important}
+[data-baseweb="popover"] ul,[data-baseweb="popover"] li{background:var(--panel2)!important;color:var(--ivory)!important}
+[data-baseweb="tag"]{background:var(--gold)!important}
+[data-baseweb="tag"] *{color:#0a0f1c!important}
+/* buttons */
+.stApp .stButton>button,.stApp .stLinkButton a{background:transparent;border:1px solid var(--gold);color:var(--gold2)!important;border-radius:999px;font-weight:500;letter-spacing:.03em;transition:all .2s}
+.stApp .stButton>button:hover,.stApp .stLinkButton a:hover{background:var(--gold);color:#0a0f1c!important;border-color:var(--gold)}
+.stApp .stButton>button p{color:inherit!important}
+.stApp [data-testid="stFormSubmitButton"] button{background:linear-gradient(135deg,#e8d08a,#c9a24b);color:#0a0f1c!important;border:none;font-weight:600}
+.stApp [data-testid="stFormSubmitButton"] button p{color:#0a0f1c!important}
+[data-testid="stForm"]{background:rgba(17,26,46,.7);border:1px solid var(--line);border-radius:14px}
+/* tabs */
+.stTabs [data-baseweb="tab-list"]{gap:4px;border-bottom:1px solid var(--line)}
+.stTabs [data-baseweb="tab"]{color:var(--muted)!important;font-weight:500;padding:.6rem 1rem}
+.stTabs [aria-selected="true"]{color:var(--gold2)!important}
+.stTabs [data-baseweb="tab-highlight"]{background:var(--gold)!important;height:2px}
+/* hero */
+.hero{position:relative;border:1px solid var(--line);border-radius:20px;padding:3rem 2.6rem 2.2rem;margin:.4rem 0 1.6rem;overflow:hidden;
+ background:linear-gradient(120deg,rgba(15,27,52,.95),rgba(9,14,28,.92)),url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='56'%3E%3Cpath d='M0 28h56M28 0v56' stroke='%23c9a24b' stroke-opacity='.08'/%3E%3C/svg%3E");box-shadow:0 20px 60px rgba(0,0,0,.45)}
+.hero:before{content:"";position:absolute;right:-90px;top:-90px;width:380px;height:380px;border-radius:50%;border:1px solid rgba(201,162,75,.35);box-shadow:0 0 0 38px rgba(201,162,75,.05),0 0 0 80px rgba(201,162,75,.035)}
+.eyebrow{color:var(--gold);font-size:.72rem;letter-spacing:.28em;font-weight:600;text-transform:uppercase}
+.hero-title{font-family:'Playfair Display',serif;font-size:4.2rem;line-height:1.05;font-weight:700;margin:.5rem 0 .6rem;background:linear-gradient(90deg,#f7f1e3,#e8d08a 70%);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero-tag{color:#c4ccdc;font-size:1.12rem;max-width:640px;line-height:1.55}
+.stats{display:flex;gap:2.6rem;margin-top:1.8rem;flex-wrap:wrap}
+.stat-n{font-family:'Playfair Display',serif;font-size:2rem;color:var(--gold2)}
+.stat-l{color:var(--muted);font-size:.74rem;letter-spacing:.16em;text-transform:uppercase}
+.sec-title{font-family:'Playfair Display',serif;font-size:1.7rem;color:var(--ivory);margin:.2rem 0 .1rem}
+/* visual panel */
+.vis{position:relative;display:flex;align-items:flex-end;justify-content:space-between;padding:.8rem 1rem}
+.vis-icon{font-size:2.6rem;filter:drop-shadow(0 4px 10px rgba(0,0,0,.5));opacity:.95}
+.vis-cat{color:#f3ede0;font-size:.68rem;letter-spacing:.2em;text-transform:uppercase;background:rgba(8,12,24,.55);border:1px solid var(--line);padding:3px 10px;border-radius:999px}
+/* cards */
+[class*="st-key-card_"]{background:linear-gradient(180deg,var(--panel),#0e1628);border:1px solid var(--line);border-radius:16px;overflow:hidden;gap:.3rem;padding-bottom:1rem;transition:transform .25s,box-shadow .25s,border-color .25s}
+[class*="st-key-card_"]:hover{transform:translateY(-4px);box-shadow:0 18px 40px rgba(0,0,0,.5);border-color:var(--gold)}
+[class*="st-key-card_"] .stButton{padding:0 1.1rem}
+.rc-body{padding:.9rem 1.1rem .2rem}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:.66rem;letter-spacing:.14em;font-weight:600;text-transform:uppercase}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.rc-region{color:var(--muted);font-size:.72rem;float:right;letter-spacing:.1em;text-transform:uppercase}
+.rc-title{font-family:'Playfair Display',serif;font-weight:600;font-size:1.22rem;line-height:1.28;margin:.55rem 0 .45rem;color:var(--ivory)}
+.rc-sum{color:#b9c2d3;font-size:.9rem;line-height:1.55}
+.rc-src{color:var(--muted);font-size:.74rem;margin-top:.7rem}
+[class*="st-key-lead_"]{background:linear-gradient(120deg,#13203a,#0d1526);border:1px solid var(--line);border-left:3px solid var(--gold);border-radius:18px;overflow:hidden;padding:0;margin-bottom:1.4rem;box-shadow:0 16px 50px rgba(0,0,0,.4)}
+.lead-body{padding:1.6rem 1.4rem .2rem}
+.lead-title{font-family:'Playfair Display',serif;font-weight:700;font-size:2.05rem;line-height:1.18;margin:.7rem 0;color:var(--ivory)}
+.lead-act{color:#d9cfa8;font-size:.92rem;border-top:1px solid var(--line);margin-top:.9rem;padding-top:.8rem}
+.empty{border:1px dashed var(--line);border-radius:16px;padding:2.4rem;text-align:center;color:var(--muted);margin:1rem 0}
+/* newsletter band */
+[class*="st-key-band"]{background:linear-gradient(120deg,#16233f,#0c1426);border:1px solid var(--line);border-radius:20px;padding:2rem 2rem 1.2rem;margin:2.2rem 0 1rem;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+.band-title{font-family:'Playfair Display',serif;font-size:2rem;line-height:1.2;color:var(--ivory);margin:.5rem 0 .9rem}
+.band-li{color:#c4ccdc;font-size:.95rem;margin:.4rem 0}
+.band-li b{color:var(--gold2)}
+.disc{color:var(--muted);font-size:.74rem;line-height:1.5;text-align:center;margin:1.6rem auto 2rem;max-width:760px}
+/* dialog */
+div[role="dialog"]{background:#0e1626!important;border:1px solid var(--line);border-radius:18px}
+div[role="dialog"] :where(h1,h2,h3,p,span,div,label){color:#f3ede0}
+.dlg-title{font-family:'Playfair Display',serif;font-weight:700;font-size:1.9rem;line-height:1.2;margin:.7rem 0 .3rem}
+.dlg-meta{color:var(--muted)!important;font-size:.8rem;margin-bottom:.9rem}
+.dlg-h{color:var(--gold)!important;font-size:.7rem;letter-spacing:.22em;font-weight:600;margin:1.1rem 0 .25rem}
+.dlg-t{color:#dfe4ee!important;font-size:.97rem;line-height:1.65}
+.dlg-note{border-left:3px solid var(--gold);background:rgba(201,162,75,.09);padding:.8rem 1rem;border-radius:0 10px 10px 0;margin-top:1.2rem}
+.gold-link{display:inline-block;margin-top:1.3rem;padding:.55rem 1.3rem;border:1px solid var(--gold);border-radius:999px;color:var(--gold2)!important;text-decoration:none!important;font-weight:500}
+.gold-link:hover{background:var(--gold);color:#0a0f1c!important}
 </style>"""
+
 DISCLAIMER = ("Summaries are generated with AI from public sources for information only. They are not legal or regulatory "
               "advice. Always verify against the original source before acting.")
+IMPACT_DOT = {"High": "#ef5350", "Medium": "#e6a23c", "Low": "#43b78d"}
+CAT_STYLE = {   # emoji, gradient start, gradient end
+    "US FDA": ("🛡️", "#1b4175", "#0a1b38"),
+    "EU MDR/IVDR": ("🇪🇺", "#26399a", "#0f1745"),
+    "UK MHRA": ("🏛️", "#6b2236", "#260c15"),
+    "India CDSCO": ("🧭", "#8a5513", "#2a1905"),
+    "Global & Standards": ("🌐", "#11585a", "#06262a"),
+    "Dental": ("🦷", "#4a3480", "#171034"),
+    "Industry": ("📈", "#34415a", "#10172a"),
+}
 
-def badges(a):
+def esc(t):
+    return html.escape(str(t or "")).replace("\n", "<br>")
+
+def safe_url(u):
+    u = (u or "").strip()
+    if not u.lower().startswith(("http://", "https://")):
+        return None
+    return quote(u, safe=":/?&=%#@+,;~!*$-_.")
+
+def pill(a):
     imp = a.get("impact") or "Medium"
-    return (f"<span class='badge' style='background:{IMPACT_COLOR.get(imp, '#6b7280')}'>{html.escape(imp.upper())} IMPACT</span>"
-            f"<span class='chip'>{html.escape(a.get('category') or '')}</span>"
-            f"<span class='chip'>{html.escape(a.get('region') or a.get('country') or '')}</span>")
+    col = IMPACT_DOT.get(imp, "#9aa4b8")
+    return f"<span class='pill' style='color:{col}'><span class='dot' style='background:{col}'></span>{esc(imp)} impact</span>"
+
+def visual(a, height):
+    icon, c1, c2 = CAT_STYLE.get(a.get("category"), ("🩺", "#1f2a44", "#0e1424"))
+    layers = []
+    img = safe_url(a.get("image"))
+    if img:
+        layers += ["linear-gradient(180deg,rgba(8,12,24,.10),rgba(8,12,24,.82))", f"url('{img}')"]
+    layers.append(f"linear-gradient(135deg,{c1},{c2})")
+    return (f"<div class='vis' style=\"height:{height}px;background:{','.join(layers)};background-size:cover;background-position:center\">"
+            f"<span class='vis-icon'>{icon}</span><span class='vis-cat'>{esc(a.get('category'))}</span></div>")
+
+@st.cache_data(ttl=120)
+def site_stats():
+    r = q("SELECT COUNT(*) n, COALESCE(SUM(impact='High'),0) h, COUNT(DISTINCT NULLIF(region,'')) rg "
+          "FROM articles WHERE status='published'")[0]
+    wk = q("SELECT COUNT(*) n FROM articles WHERE status='published' AND date(created_at)>=date('now','-7 day')")[0]["n"]
+    return r["n"], r["h"], r["rg"], wk
 
 @st.cache_data(ttl=120)
 def load_articles(category=None, search="", impacts=None, region=None):
@@ -364,56 +464,93 @@ def load_articles(category=None, search="", impacts=None, region=None):
         sql += " AND (title LIKE ? OR summary LIKE ? OR what_changed LIKE ?)"; args += [f"%{search}%"] * 3
     return q(sql + " ORDER BY featured DESC, id DESC LIMIT 60", args)
 
-@st.dialog("Regulatory update", width="large")
+def hero_html():
+    total, high, regions, week = site_stats()
+    stats = "".join(f"<div><div class='stat-n'>{n}</div><div class='stat-l'>{l}</div></div>"
+                    for n, l in [(total, "Briefings"), (week, "This week"), (high, "High impact"), (regions, "Regions")])
+    return (f"<div class='hero'><div class='eyebrow'>Medical devices &nbsp;·&nbsp; Dental &nbsp;·&nbsp; Regulatory intelligence</div>"
+            f"<div class='hero-title'>{esc(get_setting('site_title'))}</div>"
+            f"<div class='hero-tag'>{esc(get_setting('tagline'))}</div><div class='stats'>{stats}</div></div>")
+
+@st.dialog("Regulatory briefing", width="large")
 def reader(a):
-    st.markdown(badges(a), unsafe_allow_html=True)
-    st.subheader(a["title"])
-    st.caption(f"{a['source']} · {a['published'] or a['created_at']}")
-    st.markdown("**What changed**"); st.write(a["what_changed"] or a["summary"])
-    st.markdown("**Who is affected**"); st.write(a["who_affected"] or "See source.")
-    st.markdown("**What to do**"); st.write(a["action"] or "Review the original source.")
-    if a.get("expert_note"):
-        st.info(f"**{get_setting('editor_label')}:** {a['expert_note']}")
-    if a["image"]:
-        st.image(a["image"], width="stretch")
-    st.link_button("Read the original source ↗", a["url"])
-    st.markdown(f"<div class='disclaimer'>{DISCLAIMER}</div>", unsafe_allow_html=True)
+    secs = [("WHAT CHANGED", a["what_changed"] or a["summary"]), ("WHO IS AFFECTED", a["who_affected"] or "See source."),
+            ("WHAT TO DO", a["action"] or "Review the original source.")]
+    body = "".join(f"<div class='dlg-h'>{h}</div><div class='dlg-t'>{esc(t)}</div>" for h, t in secs)
+    note = (f"<div class='dlg-note'><div class='dlg-h' style='margin-top:0'>{esc(get_setting('editor_label')).upper()}</div>"
+            f"<div class='dlg-t'>{esc(a['expert_note'])}</div></div>") if a.get("expert_note") else ""
+    src = safe_url(a["url"]) or "#"
+    st.markdown(f"<div>{pill(a)}<div class='dlg-title'>{esc(a['title'])}</div>"
+                f"<div class='dlg-meta'>{esc(a['source'])} · {esc(a['region'] or a['country'])} · {esc((a['created_at'] or '')[:10])}</div>"
+                f"{visual(a, 150)}{body}{note}"
+                f"<a class='gold-link' href='{src}' target='_blank' rel='noopener'>Read the original source →</a>"
+                f"<div class='disc' style='text-align:left;margin:1.4rem 0 0'>{esc(DISCLAIMER)}</div></div>", unsafe_allow_html=True)
 
 def card(a, tab_key):
-    with st.container(border=True):
-        st.markdown(f"{badges(a)}<div class='card-title'>{html.escape(a['title'] or '')}</div>"
-                    f"<span class='meta'>{html.escape(a['source'] or '')}</span>", unsafe_allow_html=True)
-        st.caption(a["summary"])
-        if a.get("expert_note"):
-            st.caption(f"🩺 {a['expert_note'][:140]}")
-        if st.button("Details", key=f"r{tab_key}{a['id']}"):
+    with st.container(key=f"card_{tab_key}_{a['id']}"):
+        st.markdown(f"{visual(a, 120)}<div class='rc-body'>{pill(a)}<span class='rc-region'>{esc(a['region'] or a['country'])}</span>"
+                    f"<div class='rc-title'>{esc(a['title'])}</div><div class='rc-sum'>{esc(a['summary'])}</div>"
+                    f"<div class='rc-src'>{esc(a['source'])} · {esc((a['created_at'] or '')[:10])}</div></div>", unsafe_allow_html=True)
+        if st.button("Read briefing", key=f"b{tab_key}{a['id']}"):
             reader(a)
 
+def lead_card(a, tab_key):
+    with st.container(key=f"lead_{tab_key}"):
+        c1, c2 = st.columns([5, 6], gap="small")
+        with c1:
+            st.markdown(visual(a, 330), unsafe_allow_html=True)
+        with c2:
+            st.markdown(f"<div class='lead-body'><div class='eyebrow'>Lead briefing</div>{pill(a)}"
+                        f"<div class='lead-title'>{esc(a['title'])}</div><div class='rc-sum'>{esc(a['summary'])}</div>"
+                        f"<div class='lead-act'><b>What to do:</b> {esc(a['action'] or 'Review the original source.')}</div>"
+                        f"<div class='rc-src'>{esc(a['source'])} · {esc(a['region'] or a['country'])}</div></div>", unsafe_allow_html=True)
+            if st.button("Read the full briefing →", key=f"lb{tab_key}{a['id']}"):
+                reader(a)
+
+def render_feed(items, tab_key):
+    if not items:
+        st.markdown("<div class='empty'>No published briefings here yet.</div>", unsafe_allow_html=True)
+        return
+    lead = next((a for a in items if a["featured"]), next((a for a in items if a["impact"] == "High"), items[0]))
+    lead_card(lead, tab_key)
+    rest = [a for a in items if a["id"] != lead["id"]]
+    for i in range(0, len(rest), 3):
+        for col, a in zip(st.columns(3, gap="medium"), rest[i:i + 3]):
+            with col:
+                card(a, tab_key)
+
+def signup_band():
+    with st.container(key="band"):
+        c1, c2 = st.columns([5, 4], gap="large")
+        with c1:
+            st.markdown("<div class='eyebrow'>The weekly digest</div><div class='band-title'>Regulatory change, distilled.</div>"
+                        "<div class='band-li'><b>◆</b>&nbsp; FDA, EU MDR/IVDR, MHRA and CDSCO in one email</div>"
+                        "<div class='band-li'><b>◆</b>&nbsp; Every update impact-rated, with the action to take</div>"
+                        "<div class='band-li'><b>◆</b>&nbsp; Free, written for device &amp; dental professionals</div>", unsafe_allow_html=True)
+        with c2:
+            signup_form("band")
+
 def news_page():
-    st.markdown(f"<h1 class='brand'>🩺 {html.escape(get_setting('site_title'))}</h1>", unsafe_allow_html=True)
-    st.caption(get_setting("tagline"))
+    st.markdown(LUX_CSS, unsafe_allow_html=True)
+    st.markdown(hero_html(), unsafe_allow_html=True)
     with st.sidebar:
-        st.header("Filters")
+        st.header("Refine")
         search = st.text_input("Search")
         impacts = st.multiselect("Impact", IMPACTS, default=IMPACTS)
         region = st.selectbox("Region", ["All"] + REGIONS)
         if st.button("Refresh"):
             st.cache_data.clear()
         st.divider()
-        signup_box("side")
-    signup_box("top")
+        st.markdown("**📬 Weekly digest**")
+        signup_form("side")
+    st.markdown("<div class='eyebrow'>The briefing room</div><div class='sec-title'>Latest regulatory intelligence</div>", unsafe_allow_html=True)
     tabs = st.tabs(["Latest"] + CATEGORIES)
     for tab, cat in zip(tabs, [None] + CATEGORIES):
         with tab:
-            items = load_articles(cat, search, tuple(impacts), region)
-            if not items:
-                st.info("No published updates here yet.")
-                continue
-            for i in range(0, len(items), 3):
-                for col, a in zip(st.columns(3), items[i:i + 3]):
-                    with col:
-                        card(a, cat or "all")
-    st.markdown(f"<div class='disclaimer'>{DISCLAIMER}</div>", unsafe_allow_html=True)
+            render_feed(load_articles(cat, search, tuple(impacts), region), cat or "all")
+    signup_band()
+    st.markdown(f"<div class='disc'>{esc(DISCLAIMER)}</div>", unsafe_allow_html=True)
+
 
 # ============================== ADMIN ==============================
 def build_digest(days=7):
@@ -615,7 +752,6 @@ def admin_page():
 def main():
     init_db()
     st.set_page_config(page_title=get_setting("site_title"), page_icon="🩺", layout="wide")
-    st.markdown(CSS, unsafe_allow_html=True)
     page = st.sidebar.radio("Navigate", ["📰 Updates", "⚙️ Admin"], label_visibility="collapsed")
     st.sidebar.divider()
     news_page() if page == "📰 Updates" else admin_page()
