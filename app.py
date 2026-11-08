@@ -18,8 +18,12 @@ from bs4 import BeautifulSoup
 
 # ============================== CONFIG ==============================
 DB_PATH = os.getenv("NEWS_DB", "news.db")
-UA = {"User-Agent": "Mozilla/5.0 (compatible; RegPulseBot/1.0)"}
-NICHE = "regintel-v1"
+UA = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    "Accept": "application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.8, text/html;q=0.6, */*;q=0.5",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+NICHE = "regintel-v2"
 
 CATEGORIES = ["US FDA", "EU MDR/IVDR", "UK MHRA", "India CDSCO", "Global & Standards", "Dental", "Industry"]
 REGIONS = ["US", "EU", "UK", "India", "Global", "Other"]
@@ -30,9 +34,14 @@ IMPACT_COLOR = {"High": "#b91c1c", "Medium": "#b45309", "Low": "#15803d"}
 FDA = "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds"
 # (name, rss_url, category, region, keywords-filter)
 DEFAULT_SOURCES = [
-    ("FDA Medical Devices", f"{FDA}/medical-devices/rss.xml", "US FDA", "US", ""),
-    ("FDA Device Recalls", f"{FDA}/medical-device-recalls/rss.xml", "US FDA", "US", ""),
+    ("FDA Press Releases", f"{FDA}/press-releases/rss.xml", "US FDA", "US",
+     "device,diagnostic,dental,510(k),clearance,UDI,software,implant"),
+    ("FDA Recalls & Alerts", f"{FDA}/recalls/rss.xml", "US FDA", "US",
+     "device,pump,implant,catheter,diagnostic,monitor,stent,software,dental"),
     ("FDA MedWatch Alerts", f"{FDA}/medwatch/rss.xml", "US FDA", "US", "device"),
+    ("Federal Register - FDA devices",
+     "https://www.federalregister.gov/api/v1/documents.rss?conditions%5Bagencies%5D%5B%5D=food-and-drug-administration"
+     "&conditions%5Bterm%5D=%22medical+device%22", "US FDA", "US", ""),
     ("MHRA (GOV.UK)", "https://www.gov.uk/government/organisations/medicines-and-healthcare-products-regulatory-agency.atom",
      "UK MHRA", "UK", "device,diagnostic,software,UKCA,implant"),
     ("Easy Medical Device", "https://www.easymedicaldevice.com/feed/", "EU MDR/IVDR", "EU", ""),
@@ -109,12 +118,17 @@ def init_db():
         for k, v in DEFAULT_SETTINGS.items():
             c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", (k, v))
         row = c.execute("SELECT value FROM settings WHERE key='niche'").fetchone()
-        if not row or row[0] != NICHE:      # one-time switch from the old general-news setup
-            c.execute("UPDATE articles SET status='archived' WHERE status IN ('published','pending')")
-            c.execute("DELETE FROM sources")
-            c.executemany("INSERT INTO sources(name,url,category,country,keywords) VALUES(?,?,?,?,?)", DEFAULT_SOURCES)
-            for k in ("site_title", "tagline", "auto_publish", "max_per_feed"):
-                c.execute("UPDATE settings SET value=? WHERE key=?", (DEFAULT_SETTINGS[k], k))
+        prev = row[0] if row else None
+        if prev != NICHE:
+            if prev == "regintel-v1":       # fix wrong FDA feed URLs, keep articles and your edits
+                c.execute("DELETE FROM sources WHERE url LIKE '%/medical-devices/rss.xml' OR url LIKE '%/medical-device-recalls/rss.xml'")
+                c.executemany("INSERT OR IGNORE INTO sources(name,url,category,country,keywords) VALUES(?,?,?,?,?)", DEFAULT_SOURCES)
+            else:                           # one-time switch from the old general-news setup
+                c.execute("UPDATE articles SET status='archived' WHERE status IN ('published','pending')")
+                c.execute("DELETE FROM sources")
+                c.executemany("INSERT INTO sources(name,url,category,country,keywords) VALUES(?,?,?,?,?)", DEFAULT_SOURCES)
+                for k in ("site_title", "tagline", "auto_publish", "max_per_feed"):
+                    c.execute("UPDATE settings SET value=? WHERE key=?", (DEFAULT_SETTINGS[k], k))
             c.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('niche',?)", (NICHE,))
 
 def get_setting(key):
@@ -194,6 +208,30 @@ def feed_image(e):
     m = re.search(r'<img[^>]+src="([^"]+)"', e.get("summary", "") or "")
     return m.group(1) if m else None
 
+def fetch_feed(url):
+    """Fetch + parse a feed with browser headers; tries URL variants. Returns (parsed|None, status_text)."""
+    variants = [url]
+    if url.startswith("http"):
+        variants.append(url.replace("://www.", "://", 1) if "://www." in url else url.replace("://", "://www.", 1))
+        if "?" not in url:
+            variants.append(url.rstrip("/") + "/?feed=rss2")
+    last = "no response"
+    for u in variants:
+        try:
+            if os.path.exists(u):
+                parsed = feedparser.parse(u)
+            else:
+                r = requests.get(u, headers=UA, timeout=15)
+                if r.status_code != 200:
+                    last = f"HTTP {r.status_code}"; continue
+                parsed = feedparser.parse(r.content)
+            if parsed.entries:
+                return parsed, "OK"
+            last = "reachable but no feed entries"
+        except Exception as e:
+            last = type(e).__name__
+    return None, last
+
 def fetch_page(url):
     try:
         r = requests.get(url, headers=UA, timeout=12)
@@ -209,12 +247,9 @@ def scrape_all(log=print):
     maxn = int(get_setting("max_per_feed") or 4)
     added = 0
     for s in q("SELECT * FROM sources WHERE active=1"):
-        try:
-            feed = feedparser.parse(s["url"], request_headers=UA)
-        except Exception as e:
-            log(f"[{s['name']}] ERROR {e}"); continue
-        if not feed.entries:
-            log(f"[{s['name']}] no entries (check the feed URL)"); continue
+        feed, status = fetch_feed(s["url"])
+        if feed is None:
+            log(f"[{s['name']}] FAILED: {status}"); continue
         kws = [k.strip().lower() for k in (s.get("keywords") or "").split(",") if k.strip()]
         new = 0
         for e in feed.entries[:60]:
@@ -412,12 +447,8 @@ def save_article(i, f, status):
 def check_feeds():
     rows = []
     for s in q("SELECT * FROM sources"):
-        try:
-            fd = feedparser.parse(s["url"], request_headers=UA)
-            n = len(fd.entries)
-            rows.append({"source": s["name"], "entries": n, "status": "OK" if n else f"No entries ({getattr(fd, 'status', 'no response')})"})
-        except Exception as e:
-            rows.append({"source": s["name"], "entries": 0, "status": f"Error: {e}"})
+        fd, status = fetch_feed(s["url"])
+        rows.append({"source": s["name"], "entries": len(fd.entries) if fd else 0, "status": status})
     return pd.DataFrame(rows)
 
 def admin_page():
