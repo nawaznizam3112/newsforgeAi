@@ -21,5 +21,5 @@ DEFAULT_SETTINGS = {
     "auto_publish": "1",      # 1 = AI-rewritten articles go live automatically
     "ai_enabled": "1",        # 0 = skip AI, use extractive summary
     "max_per_feed": "8",      # new articles per source per run
-    "model": "claude-haiku-5-5",
+    "model": "gemini-2.5-flash",
 }
