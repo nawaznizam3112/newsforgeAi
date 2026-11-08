@@ -10,6 +10,16 @@ no clickbait. Return ONLY JSON with keys:
 "body" (3-5 short paragraphs, 150-250 words, separated by blank lines).
 Valid categories for context: {CATS}."""
 
+def get_key():
+    key = os.getenv("GEMINI_API_KEY")
+    if key:
+        return key
+    try:
+        import streamlit as st
+        return st.secrets["GEMINI_API_KEY"]
+    except Exception:
+        return None
+
 def _fallback(title, text):
     text = (text or "").strip()
     sentences = re.split(r"(?<=[.!?])\s+", text)
@@ -19,20 +29,26 @@ def _fallback(title, text):
 
 def rewrite(title, text):
     """Returns dict(title, summary, body). Falls back to extractive summary if AI is off/unavailable."""
-    key = os.getenv("ANTHROPIC_API_KEY")
+    key = get_key()
     if db.get_setting("ai_enabled") != "1" or not key or not text:
         return _fallback(title, text)
     try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=key)
-        msg = client.messages.create(
-            model=db.get_setting("model"), max_tokens=900, system=SYSTEM,
-            messages=[{"role": "user", "content": f"TITLE: {title}\n\nARTICLE:\n{text[:6000]}"}],
+        from google import genai
+        from google.genai import types
+        client = genai.Client(api_key=key)
+        resp = client.models.generate_content(
+            model=db.get_setting("model"),
+            contents=f"TITLE: {title}\n\nARTICLE:\n{text[:6000]}",
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM,
+                response_mime_type="application/json",
+                max_output_tokens=1200,
+                temperature=0.4,
+            ),
         )
-        raw = "".join(b.text for b in msg.content if b.type == "text")
-        raw = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.M).strip()
+        raw = re.sub(r"^```(?:json)?|```$", "", (resp.text or "").strip(), flags=re.M).strip()
         data = json.loads(raw)
         return {k: data[k] for k in ("title", "summary", "body")}
     except Exception as e:
-        print("AI rewrite failed:", e)
+        print("Gemini rewrite failed:", e)
         return _fallback(title, text)
