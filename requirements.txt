@@ -1,0 +1,7 @@
+streamlit>=1.40
+feedparser>=6.0
+requests>=2.32
+trafilatura>=1.12
+beautifulsoup4>=4.12
+anthropic>=0.40
+pandas>=2.2
