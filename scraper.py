@@ -1,4 +1,4 @@
-import re, time
+import os, re, time
 import feedparser, requests, trafilatura
 from bs4 import BeautifulSoup
 import db
@@ -64,10 +64,11 @@ def rewrite_pending(limit=25, log=print):
         db.ex("UPDATE articles SET title=?, summary=?, body=?, ai_done=1, status=? WHERE id=?",
               (r["title"], r["summary"], r["body"], "published" if auto else "pending", a["id"]))
         done += 1
+        if os.getenv('GEMINI_API_KEY') and db.get_setting('ai_enabled') == '1':
+            time.sleep(4)  # stay under free-tier rate limits
     log(f"rewrote {done} articles")
     return done
 
 if __name__ == "__main__":
     scrape_all()
     rewrite_pending(limit=40)
-
