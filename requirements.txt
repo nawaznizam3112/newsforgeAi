@@ -1,7 +1,7 @@
-streamlit>=1.40
+streamlit>=1.50
 feedparser>=6.0
 requests>=2.32
 trafilatura>=1.12
 beautifulsoup4>=4.12
-anthropic>=0.40
+google-genai>=1.0
 pandas>=2.2
